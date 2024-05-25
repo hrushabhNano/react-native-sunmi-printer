@@ -64,19 +64,36 @@ public class SunmiPrinterModule extends ReactContextBaseJavaModule {
     }
   };
 
-  InnerPrinterCallback innerPrinterCallback = new InnerPrinterCallback() {
+ InnerPrinterCallback innerPrinterCallback = new InnerPrinterCallback() {
     @Override
     protected void onConnected(SunmiPrinterService service) {
-      // 这⾥即获取到绑定服务成功连接后的远程服务接⼝句柄
-      // 可以通过service调⽤⽀持的打印⽅法
-      printerService = service;
+        printerService = service;
+        processQueue();
     }
 
     @Override
     protected void onDisconnected() {
-      // 当服务异常断开后，会回调此⽅法，建议在此做重连策略
+        printerService = null;
     }
-  };
+};
+
+private Queue<Runnable> methodQueue = new LinkedList<>();
+
+private void executeWhenConnected(Runnable method) {
+    if (printerService == null) {
+        methodQueue.add(method);
+        reconnectPrinterService();
+    } else {
+        method.run();
+    }
+}
+
+private void processQueue() {
+    while (!methodQueue.isEmpty()) {
+        methodQueue.poll().run();
+    }
+}
+
 
   public SunmiPrinterModule(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -291,10 +308,32 @@ public class SunmiPrinterModule extends ReactContextBaseJavaModule {
    *
    * @param text
    */
+  // @ReactMethod
+  // public void printerText(String text) throws RemoteException {
+  //   printerService.printText(text, null);
+  // }
+
   @ReactMethod
-  public void printerText(String text) throws RemoteException {
-    printerService.printText(text, null);
-  }
+  public void printerText(int n) throws RemoteException {
+    if (printerService == null) {
+        // Attempt to reconnect the printer service
+        reconnectPrinterService();
+    }
+    if (printerService != null) {
+        printerService.printText(n, innerResultCallback);
+    } else {
+        Log.e(TAG, "Printer service is still null after reconnection attempt.");
+        throw new RemoteException("Printer service is not connected.");
+    }
+}
+
+private void reconnectPrinterService() {
+    try {
+        InnerPrinterManager.getInstance().bindService(getReactApplicationContext(), innerPrinterCallback);
+    } catch (RemoteException e) {
+        Log.e(TAG, "Failed to reconnect to printer service: " + e.getMessage());
+    }
+}
 
   /**
    * 打印指定字体，⼤⼩的⽂本
